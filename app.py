@@ -6,7 +6,7 @@ import google.generativeai as genai
 from PIL import Image
 import json
 import time
-import re  # ★重要：JSON抽出用に追加
+import re
 
 # --- ページ設定 ---
 st.set_page_config(
@@ -16,19 +16,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- APIキーの設定（Secrets対応・エラー回避版） ---
+# --- APIキーの設定 ---
 try:
-    # Secretsからキーを読み込み、前後の余計な空白を削除(.strip)してエラーを防ぐ
     if "GEMINI_API_KEY" in st.secrets:
         API_KEY = st.secrets["GEMINI_API_KEY"].strip()
         genai.configure(api_key=API_KEY)
     else:
-        # Secrets未設定時の表示
         st.error("APIキーが設定されていません。StreamlitのSecretsを設定してください。")
 except Exception as e:
     st.error(f"APIキーの設定エラー: {e}")
 
-# --- CSS（デザイン調整） ---
+# --- CSS ---
 st.markdown("""
     <style>
     .stButton button { width: 100%; font-weight: bold; height: 3em; }
@@ -36,7 +34,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- データベース設定 ---
+# --- データベース ---
 DB_NAME = 'kakeibo.db'
 
 def init_db():
@@ -83,22 +81,19 @@ def get_monthly_budgets(month):
 
 init_db()
 
-# --- カテゴリー一覧 ---
 CATEGORIES = [
     "食費", "外食費", "日用品", "交通費", "家賃", "通信費(Wi-Fi)", "通信費(携帯)", 
     "ナッシュ", "Netflix", "Google One", "電気", "ガス", "水道", "電話代",
     "娯楽・趣味", "美容・衣類", "交際費", "医療費", "特別費", "その他"
 ]
 
-# --- AI解析関数（全エラー対策済み） ---
+# --- AI解析関数 ---
 def analyze_receipt(image):
-    # ★対策1：確実に動くモデルを指定
     model = genai.GenerativeModel("gemini-flash-latest")
     
     categories_str = ", ".join([f'"{c}"' for c in CATEGORIES])
     prompt = f"""
     このレシート画像を解析して、以下のJSONデータのみを出力してください。
-    余計な挨拶やマークダウン(```jsonなど)は一切不要です。
     
     {{
         "date": "YYYY-MM-DD",
@@ -110,26 +105,25 @@ def analyze_receipt(image):
     カテゴリー候補: [{categories_str}]
     """
     
-    # ★対策2：画像を小さくリサイズしてタイムアウト（フリーズ）を防ぐ
+    # 画像リサイズ
     img_resized = image.copy()
     img_resized.thumbnail((600, 600))
     
-    st.write("🔄 AIが解析中...") 
+    # 進捗表示
+    st.write("🔄 AI解析中...")
     
     try:
-        # ★対策3：タイムアウト設定を追加（15秒で応答がなければ切る）
         response = model.generate_content(
             [prompt, img_resized], 
             request_options={"timeout": 15} 
         )
         text = response.text
         
-        # ★対策4：AIの返答からJSON部分だけを無理やり抽出する（形式エラー対策）
+        # JSON抽出
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             json_str = match.group(0)
-            data = json.loads(json_str)
-            return data
+            return json.loads(json_str)
         else:
             st.error(f"データが見つかりませんでした: {text}")
             return None
@@ -141,7 +135,6 @@ def analyze_receipt(image):
 # --- メイン画面 ---
 st.title("💳 Smart Budget")
 
-# サイドバー
 st.sidebar.title("Settings")
 df_all = get_expenses()
 if not df_all.empty:
@@ -165,12 +158,13 @@ with tab1:
         
         if img_file:
             image = Image.open(img_file)
-            st.image(image, use_container_width=True)
+            # ★警告対策：use_container_width を use_column_width に変更
+            st.image(image, use_column_width=True)
             
             if st.button("AI解析スタート 🚀", type="primary"):
-                # ここでスピナーを回さない（関数内でst.writeして進捗を見せるため）
                 data = analyze_receipt(image)
                 if data:
+                    # ★ここが修正点：try-exceptの範囲を狭め、rerunの邪魔をさせない
                     try:
                         try: date_obj = datetime.datetime.strptime(data["date"], "%Y-%m-%d").date()
                         except: date_obj = datetime.date.today()
@@ -182,10 +176,13 @@ with tab1:
                         if ai_cat not in CATEGORIES: ai_cat = "その他"
                         st.session_state["input_category"] = ai_cat
                         
-                        st.success("完了！登録ボタンを押してください")
-                        st.rerun()
-                    except:
-                        st.error("データの形式エラー：AIが予期せぬデータを返しました")
+                    except Exception as e:
+                        st.error(f"データ変換エラー: {e}")
+                    
+                    # 成功メッセージとリロード（tryブロックの外に出しました）
+                    st.success("完了！登録ボタンを押してください")
+                    time.sleep(1) # メッセージを読む時間を少し作る
+                    st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -209,6 +206,8 @@ with tab1:
                 st.success("登録しました")
                 st.session_state["input_amount"] = 0
                 st.session_state["input_item"] = ""
+                time.sleep(1)
+                st.rerun()
 
 with tab2:
     st.header(f"{selected_month}")
@@ -235,6 +234,7 @@ with tab2:
         if st.button("予算保存"):
             for i, r in edited_df.iterrows(): set_category_budget(selected_month, r["項目"], r["予算"])
             st.success("保存しました")
+            time.sleep(0.5)
             st.rerun()
 
     st.subheader("詳細リスト")
