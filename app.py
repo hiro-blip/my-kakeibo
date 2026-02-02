@@ -14,10 +14,19 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- 【重要】APIキーの設定 ---
-API_KEY = "AIzaSyCeDVVW2kaNw9BMimijagtE4IUSsipBbVU"
-
-genai.configure(api_key=API_KEY)
+# --- 【重要】APIキーの設定（Secretsから読み込む） ---
+# GitHubにキーを公開しないための安全な書き方です
+try:
+    if "GEMINI_API_KEY" in st.secrets:
+        API_KEY = st.secrets["GEMINI_API_KEY"]
+    else:
+        # ローカル（自分のPC）で動かす時用に、もしSecretsがなければ直接指定もできるようにしておく
+        # ただし、GitHubに上げる時はここは空欄かダミーにしておくのが安全
+        API_KEY = "ここには何も書かないか、ローカルテスト時のみ記述" 
+        
+    genai.configure(api_key=API_KEY)
+except Exception as e:
+    st.error("APIキーの設定に失敗しました。StreamlitのSecretsを設定してください。")
 
 # --- スタイル調整（無理な色指定を廃止し、余白のみ調整） ---
 st.markdown("""
