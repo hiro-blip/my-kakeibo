@@ -15,18 +15,20 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- APIキーの設定（Secrets対応） ---
+# --- APIキーの設定（Secrets対応・改行削除版） ---
 try:
     if "GEMINI_API_KEY" in st.secrets:
-        API_KEY = st.secrets["GEMINI_API_KEY"]
+        # .strip() をつけることで、コピペで混入した改行やスペースを自動削除します
+        API_KEY = st.secrets["GEMINI_API_KEY"].strip()
     else:
         # Secretsがない場合（ローカルテスト用など）
-        # ここに直接キーを入れても動きますが、Github公開時は注意してください
-        API_KEY = "ここにAPIキーを貼り付け" 
+        # ここに直接キーを入れる場合も .strip() があるので安心です
+        raw_key = "AIzaSy..." # ←もしここに直接書くなら書き換えてください
+        API_KEY = raw_key.strip()
         
     genai.configure(api_key=API_KEY)
 except Exception as e:
-    st.error("APIキーの設定に失敗しました。")
+    st.error(f"APIキーの設定エラー: {e}")
 
 # --- CSS ---
 st.markdown("""
