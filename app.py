@@ -6,6 +6,7 @@ import google.generativeai as genai
 from PIL import Image
 import json
 import time
+import re  # ★重要：JSON抽出用に追加
 
 # --- ページ設定 ---
 st.set_page_config(
@@ -15,22 +16,19 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- APIキーの設定（Secrets対応・改行削除版） ---
+# --- APIキーの設定（Secrets対応・エラー回避版） ---
 try:
+    # Secretsからキーを読み込み、前後の余計な空白を削除(.strip)してエラーを防ぐ
     if "GEMINI_API_KEY" in st.secrets:
-        # .strip() をつけることで、コピペで混入した改行やスペースを自動削除します
         API_KEY = st.secrets["GEMINI_API_KEY"].strip()
+        genai.configure(api_key=API_KEY)
     else:
-        # Secretsがない場合（ローカルテスト用など）
-        # ここに直接キーを入れる場合も .strip() があるので安心です
-        raw_key = "AIzaSy..." # ←もしここに直接書くなら書き換えてください
-        API_KEY = raw_key.strip()
-        
-    genai.configure(api_key=API_KEY)
+        # Secrets未設定時の表示
+        st.error("APIキーが設定されていません。StreamlitのSecretsを設定してください。")
 except Exception as e:
     st.error(f"APIキーの設定エラー: {e}")
 
-# --- CSS ---
+# --- CSS（デザイン調整） ---
 st.markdown("""
     <style>
     .stButton button { width: 100%; font-weight: bold; height: 3em; }
@@ -38,7 +36,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- データベース ---
+# --- データベース設定 ---
 DB_NAME = 'kakeibo.db'
 
 def init_db():
@@ -85,34 +83,57 @@ def get_monthly_budgets(month):
 
 init_db()
 
+# --- カテゴリー一覧 ---
 CATEGORIES = [
     "食費", "外食費", "日用品", "交通費", "家賃", "通信費(Wi-Fi)", "通信費(携帯)", 
     "ナッシュ", "Netflix", "Google One", "電気", "ガス", "水道", "電話代",
     "娯楽・趣味", "美容・衣類", "交際費", "医療費", "特別費", "その他"
 ]
 
-# --- 【修正版】AI解析関数 ---
+# --- AI解析関数（全エラー対策済み） ---
 def analyze_receipt(image):
-    # ★絶対に軽いモデルを使う
+    # ★対策1：確実に動くモデルを指定
     model = genai.GenerativeModel("gemini-flash-latest")
     
     categories_str = ", ".join([f'"{c}"' for c in CATEGORIES])
     prompt = f"""
-    このレシート画像を解析してJSONのみを出力してください。
-    キー: "date", "amount", "item", "category"
+    このレシート画像を解析して、以下のJSONデータのみを出力してください。
+    余計な挨拶やマークダウン(```jsonなど)は一切不要です。
+    
+    {{
+        "date": "YYYY-MM-DD",
+        "amount": 0,
+        "item": "品目名",
+        "category": "カテゴリ名"
+    }}
+    
     カテゴリー候補: [{categories_str}]
     """
     
-    # ★画像を強制的に小さくする（幅600px）
+    # ★対策2：画像を小さくリサイズしてタイムアウト（フリーズ）を防ぐ
     img_resized = image.copy()
     img_resized.thumbnail((600, 600))
     
-    st.write("🔄 画像を圧縮しました。AIに送信します...") # デバッグ表示
+    st.write("🔄 AIが解析中...") 
     
     try:
-        response = model.generate_content([prompt, img_resized])
-        text = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(text)
+        # ★対策3：タイムアウト設定を追加（15秒で応答がなければ切る）
+        response = model.generate_content(
+            [prompt, img_resized], 
+            request_options={"timeout": 15} 
+        )
+        text = response.text
+        
+        # ★対策4：AIの返答からJSON部分だけを無理やり抽出する（形式エラー対策）
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            json_str = match.group(0)
+            data = json.loads(json_str)
+            return data
+        else:
+            st.error(f"データが見つかりませんでした: {text}")
+            return None
+            
     except Exception as e:
         st.error(f"解析エラー: {e}")
         return None
@@ -147,24 +168,24 @@ with tab1:
             st.image(image, use_container_width=True)
             
             if st.button("AI解析スタート 🚀", type="primary"):
-                with st.spinner("AIが高速解析中..."):
-                    data = analyze_receipt(image)
-                    if data:
-                        try:
-                            try: date_obj = datetime.datetime.strptime(data["date"], "%Y-%m-%d").date()
-                            except: date_obj = datetime.date.today()
-                            
-                            st.session_state["input_date"] = date_obj
-                            st.session_state["input_amount"] = int(data["amount"])
-                            st.session_state["input_item"] = data["item"]
-                            ai_cat = data.get("category", "その他")
-                            if ai_cat not in CATEGORIES: ai_cat = "その他"
-                            st.session_state["input_category"] = ai_cat
-                            
-                            st.success("完了！登録ボタンを押してください")
-                            st.rerun()
-                        except:
-                            st.error("データの形式エラー")
+                # ここでスピナーを回さない（関数内でst.writeして進捗を見せるため）
+                data = analyze_receipt(image)
+                if data:
+                    try:
+                        try: date_obj = datetime.datetime.strptime(data["date"], "%Y-%m-%d").date()
+                        except: date_obj = datetime.date.today()
+                        
+                        st.session_state["input_date"] = date_obj
+                        st.session_state["input_amount"] = int(data["amount"])
+                        st.session_state["input_item"] = data["item"]
+                        ai_cat = data.get("category", "その他")
+                        if ai_cat not in CATEGORIES: ai_cat = "その他"
+                        st.session_state["input_category"] = ai_cat
+                        
+                        st.success("完了！登録ボタンを押してください")
+                        st.rerun()
+                    except:
+                        st.error("データの形式エラー：AIが予期せぬデータを返しました")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
