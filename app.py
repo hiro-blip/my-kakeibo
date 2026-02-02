@@ -94,7 +94,7 @@ CATEGORIES = [
 # --- 【修正版】AI解析関数 ---
 def analyze_receipt(image):
     # ★絶対に軽いモデルを使う
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-flash-latest")
     
     categories_str = ", ".join([f'"{c}"' for c in CATEGORIES])
     prompt = f"""
