@@ -6,7 +6,7 @@ import google.generativeai as genai
 from PIL import Image
 import json
 
-# --- ページ設定（スマホ対応・タイトル設定） ---
+# --- ページ設定 ---
 st.set_page_config(
     page_title="Smart Budget",
     page_icon="💳",
@@ -19,25 +19,19 @@ API_KEY = "AIzaSyCeDVVW2kaNw9BMimijagtE4IUSsipBbVU"
 
 genai.configure(api_key=API_KEY)
 
-# --- カスタムCSS ---
+# --- スタイル調整（無理な色指定を廃止し、余白のみ調整） ---
 st.markdown("""
     <style>
-    .stApp {
-        background-color: #f8f9fa;
-        font-family: 'Helvetica Neue', Arial, sans-serif;
-    }
-    div[data-testid="stMetric"] {
-        background-color: #ffffff;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #e0e0e0;
-        text-align: center;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.03);
-    }
+    /* ボタンを少しリッチに */
     .stButton button {
         width: 100%;
-        border-radius: 8px;
         font-weight: bold;
+        border-radius: 8px;
+        height: 3em;
+    }
+    /* スマホでの入力欄の視認性向上 */
+    div[data-testid="stInput"] {
+        border-radius: 8px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -158,60 +152,64 @@ tab1, tab2 = st.tabs(["📝 入力 (Input)", "📊 分析 (Report)"])
 
 # === タブ1：入力 ===
 with tab1:
-    st.markdown("##### 📸 レシートスキャン")
-    camera_file = st.camera_input("カメラを起動")
-    upload_file = st.file_uploader("または画像を選択", type=["jpg", "png"])
-    img_file = camera_file if camera_file else upload_file
-    
-    if img_file:
-        image = Image.open(img_file)
-        st.image(image, use_container_width=True)
+    # カード風コンテナ（ボーダー付き）で囲む
+    with st.container(border=True):
+        st.markdown("##### 📸 レシートスキャン")
+        camera_file = st.camera_input("カメラを起動")
+        upload_file = st.file_uploader("または画像を選択", type=["jpg", "png"])
+        img_file = camera_file if camera_file else upload_file
         
-        if st.button("AI解析スタート ✨", type="primary"):
-            data = analyze_receipt(image)
-            if data:
-                try:
+        if img_file:
+            image = Image.open(img_file)
+            st.image(image, use_container_width=True)
+            
+            if st.button("AI解析スタート ✨", type="primary"):
+                data = analyze_receipt(image)
+                if data:
                     try:
-                        date_obj = datetime.datetime.strptime(data["date"], "%Y-%m-%d").date()
+                        try:
+                            date_obj = datetime.datetime.strptime(data["date"], "%Y-%m-%d").date()
+                        except:
+                            date_obj = datetime.date.today()
+                        
+                        st.session_state["input_date"] = date_obj
+                        st.session_state["input_amount"] = int(data["amount"])
+                        st.session_state["input_item"] = data["item"]
+                        
+                        ai_cat = data.get("category", "その他")
+                        if ai_cat not in CATEGORIES: ai_cat = "その他"
+                        st.session_state["input_category"] = ai_cat
+                        
+                        st.success("解析完了！")
+                        st.rerun()
                     except:
-                        date_obj = datetime.date.today()
-                    
-                    st.session_state["input_date"] = date_obj
-                    st.session_state["input_amount"] = int(data["amount"])
-                    st.session_state["input_item"] = data["item"]
-                    
-                    ai_cat = data.get("category", "その他")
-                    if ai_cat not in CATEGORIES: ai_cat = "その他"
-                    st.session_state["input_category"] = ai_cat
-                    
-                    st.success("解析完了！内容を確認して登録してください")
-                    st.rerun()
-                except:
-                    st.error("解析データの変換に失敗しました")
+                        st.error("解析データの変換に失敗しました")
 
-    st.markdown("---")
-    st.markdown("##### ✏️ 手動入力・修正")
-    
-    if "input_date" not in st.session_state: st.session_state["input_date"] = datetime.date.today()
-    if "input_amount" not in st.session_state: st.session_state["input_amount"] = 0
-    if "input_item" not in st.session_state: st.session_state["input_item"] = ""
-    if "input_category" not in st.session_state: st.session_state["input_category"] = "食費"
-    
-    with st.form("input_form", clear_on_submit=True):
-        date = st.date_input("日付", value=st.session_state["input_date"])
-        amount = st.number_input("金額 (¥)", min_value=0, step=1, value=st.session_state["input_amount"])
-        try: idx = CATEGORIES.index(st.session_state["input_category"])
-        except: idx = 0
-        category = st.selectbox("カテゴリー", CATEGORIES, index=idx)
-        item = st.text_input("品目・メモ", value=st.session_state["input_item"])
+    st.markdown("<br>", unsafe_allow_html=True) # 余白
+
+    with st.container(border=True):
+        st.markdown("##### ✏️ 手動入力・修正")
         
-        submit = st.form_submit_button("登録する ✅", use_container_width=True)
+        if "input_date" not in st.session_state: st.session_state["input_date"] = datetime.date.today()
+        if "input_amount" not in st.session_state: st.session_state["input_amount"] = 0
+        if "input_item" not in st.session_state: st.session_state["input_item"] = ""
+        if "input_category" not in st.session_state: st.session_state["input_category"] = "食費"
         
-        if submit:
-            add_expense(date, category, item, amount)
-            st.success("登録しました！")
-            st.session_state["input_amount"] = 0
-            st.session_state["input_item"] = ""
+        with st.form("input_form", clear_on_submit=True):
+            date = st.date_input("日付", value=st.session_state["input_date"])
+            amount = st.number_input("金額 (¥)", min_value=0, step=1, value=st.session_state["input_amount"])
+            try: idx = CATEGORIES.index(st.session_state["input_category"])
+            except: idx = 0
+            category = st.selectbox("カテゴリー", CATEGORIES, index=idx)
+            item = st.text_input("品目・メモ", value=st.session_state["input_item"])
+            
+            submit = st.form_submit_button("登録する ✅", type="primary")
+            
+            if submit:
+                add_expense(date, category, item, amount)
+                st.success("登録しました！")
+                st.session_state["input_amount"] = 0
+                st.session_state["input_item"] = ""
 
 # === タブ2：分析 ===
 with tab2:
@@ -229,18 +227,21 @@ with tab2:
     total_actual = sum(actual_sums.values())
     total_diff = total_budget - total_actual
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("総予算", f"¥{total_budget:,}")
-    col2.metric("総支出", f"¥{total_actual:,}")
-    col3.metric("残り", f"¥{total_diff:,}", 
-                delta=f"{total_diff:,}円" if total_diff >= 0 else f"{total_diff:,}円",
-                delta_color="normal" if total_diff >= 0 else "inverse")
-    
-    if total_budget > 0:
-        percent = min(total_actual / total_budget, 1.0)
-        st.progress(percent)
+    # 重要な数字をカードで表示
+    with st.container(border=True):
+        col1, col2, col3 = st.columns(3)
+        col1.metric("総予算", f"¥{total_budget:,}")
+        col2.metric("総支出", f"¥{total_actual:,}")
+        col3.metric("残り", f"¥{total_diff:,}", 
+                    delta=f"{total_diff:,}円" if total_diff >= 0 else f"{total_diff:,}円",
+                    delta_color="normal" if total_diff >= 0 else "inverse")
+        
+        if total_budget > 0:
+            percent = min(total_actual / total_budget, 1.0)
+            st.progress(percent)
+            st.caption(f"予算消化率: {int(percent*100)}%")
 
-    st.markdown("---")
+    st.markdown("<br>", unsafe_allow_html=True)
     
     with st.expander("⚙️ 予算設定 (Budget Config)"):
         edit_data = []
@@ -279,18 +280,15 @@ with tab2:
         
         if report_data:
             df_report = pd.DataFrame(report_data)
-            # ▼▼▼ 修正箇所：数値列のみにフォーマットを適用 ▼▼▼
+            # 数値フォーマットのみ適用（色付けはCSS競合を避けるためシンプルに）
             st.dataframe(
                 df_report.style.format({
                     "予算": "¥{:,.0f}", 
                     "実績": "¥{:,.0f}", 
                     "残高": "¥{:,.0f}"
-                }).applymap(
-                    lambda v: 'color: red; font-weight: bold;' if v < 0 else '', subset=['残高']
-                ),
+                }),
                 use_container_width=True, hide_index=True
             )
-            # ▲▲▲ 修正箇所終わり ▲▲▲
         
         with st.expander("🗑️ 履歴の確認・削除"):
             df_hist = df_month.sort_values("date", ascending=False)
