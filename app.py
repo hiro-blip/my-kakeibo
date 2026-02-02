@@ -117,24 +117,42 @@ CATEGORIES = [
     "娯楽・趣味", "美容・衣類", "交際費", "医療費", "特別費", "その他"
 ]
 
-# --- 2. AI解析 ---
+# --- 2. AIによるレシート解析関数（軽量化対応版） ---
 def analyze_receipt(image):
-    model = genai.GenerativeModel("gemini-flash-latest")
+    # ▼▼▼ 変更点：読み取り精度が高い「Pro」モデルに変更 ▼▼▼
+    # Flashで読み取れない場合、Proの方が目が良いです
+    model = genai.GenerativeModel("gemini-1.5-pro-latest")
+    
     categories_str = ", ".join([f'"{c}"' for c in CATEGORIES])
     prompt = f"""
     このレシート画像を解析して、以下の情報をJSON形式で抽出してください。
-    【ルール】
-    - 店名や品目から、リスト[{categories_str}]の中で最も適切なカテゴリを選んでください。
-    - キーは "date", "amount", "item", "category"
-    JSON以外の文字は不要です。
+    
+    【ヒント】
+    - 画像が長い場合、全体を見て「合計金額」を探してください（通常は下の方にあります）。
+    - 日付は「202X年」などを探してください。
+    - 品目は一番高いもの、または代表的なものを1つ選んでください。
+    
+    【出力ルール】
+    - キー: "date", "amount", "item", "category"
+    - categoryは次から選択: [{categories_str}]
+    JSONのみを出力すること。
     """
-    with st.spinner("AIが解析中..."):
+    
+    # ▼▼▼ 追加機能：画像の軽量化 ▼▼▼
+    # スマホの写真は巨大なので、AIが扱いやすいサイズ（長辺1024px）に縮小します
+    img_resized = image.copy()
+    img_resized.thumbnail((1024, 1024))
+    # -------------------------------
+
+    with st.spinner("AIが画像を圧縮して解析しています..."):
         try:
-            response = model.generate_content([prompt, image])
+            # 軽量化した画像(img_resized)を送る
+            response = model.generate_content([prompt, img_resized])
             text = response.text.replace("```json", "").replace("```", "").strip()
             return json.loads(text)
         except Exception as e:
-            st.error(f"解析エラー: {e}")
+            # エラーの詳細を表示しないと原因がわからないため表示
+            st.error(f"解析エラー詳細: {e}")
             return None
 
 # --- 3. メイン画面 ---
